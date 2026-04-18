@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import pg from "pg";
@@ -9,72 +10,62 @@ const { Pool } = pg;
 const app = express();
 
 app.use(cors({
-  origin: "http://localhost:5173"
+  origin: "http://localhost:5173" // change later in production if needed
 }));
 
 app.use(express.json());
 
-// PostgreSQL connection
+/* ================= DATABASE ================= */
+
 const pool = new Pool({
-  user: "postgres",
-  host: "localhost",
-  database: "pascal_db",
-  password: "oscar16",
-  port: 5432,
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
-// Create table if not exists
+console.log("DB URL loaded:", !!process.env.DATABASE_URL);
+
+/* ================= INIT DB ================= */
+
 const initDB = async () => {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS history (
-      id SERIAL PRIMARY KEY,
-      type VARCHAR(50),
-      input TEXT,
-      output TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-  console.log("✅ Database initialized");
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS history (
+        id SERIAL PRIMARY KEY,
+        type VARCHAR(50),
+        input TEXT,
+        output TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    console.log("✅ Database initialized");
+  } catch (err) {
+    console.error("❌ DB init error:", err.message);
+  }
 };
 
 initDB();
 
-// ================= ROUTES =================
+/* ================= ROUTES ================= */
 
+// Home
 app.get("/", (req, res) => {
-  res.send("Pascal Backend Running  well That's a great");
+  res.send("Pascal Backend Running 🚀");
 });
 
-// GET history
+// Get history
 app.get("/api/history", async (req, res) => {
   try {
-    const data = await pool.query("SELECT * FROM history ORDER BY id DESC");
+    const data = await pool.query(
+      "SELECT * FROM history ORDER BY id DESC"
+    );
     res.json(data.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
-//post /api/history
-app.post("/api/history", async (req, res) => {
-  try {
-    const { type, input, result } = req.body;
 
-    const query = `
-      INSERT INTO history (type, input, result)
-      VALUES ($1, $2, $3)
-      RETURNING *;
-    `;
-
-    const values = [type, input, JSON.stringify(result)];
-    const data = await pool.query(query, values);
-
-    res.json(data.rows[0]);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-//get /api/history/:id
+// Get single history
 app.get("/api/history/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -89,8 +80,29 @@ app.get("/api/history/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-//post /api/pascal
 
+// Save history
+app.post("/api/history", async (req, res) => {
+  try {
+    const { type, input, result } = req.body;
+
+    const query = `
+      INSERT INTO history (type, input, output)
+      VALUES ($1, $2, $3)
+      RETURNING *;
+    `;
+
+    const values = [type, input, JSON.stringify(result)];
+
+    const data = await pool.query(query, values);
+
+    res.json(data.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pascal triangle
 app.post("/api/pascal", (req, res) => {
   try {
     const { n } = req.body;
@@ -119,25 +131,30 @@ app.post("/api/pascal", (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-//∑ POST /api/expand
+
+// Expand expression (x+y)^n
 app.post("/api/expand", (req, res) => {
   try {
     const { expression } = req.body;
 
-    // VERY SIMPLE parser: (x+y)^n only
     const match = expression.match(/\((\w)\+(\w)\)\^(\d+)/);
 
     if (!match) {
-      return res.status(400).json({ error: "Invalid format. Use (x+y)^n" });
+      return res.status(400).json({
+        error: "Invalid format. Use (x+y)^n"
+      });
     }
 
     const [, a, b, nStr] = match;
     const n = parseInt(nStr);
 
-    let terms = [];
+    const factorial = (x) =>
+      x <= 1 ? 1 : x * factorial(x - 1);
 
-    const factorial = (x) => (x <= 1 ? 1 : x * factorial(x - 1));
-    const comb = (n, r) => factorial(n) / (factorial(r) * factorial(n - r));
+    const comb = (n, r) =>
+      factorial(n) / (factorial(r) * factorial(n - r));
+
+    let terms = [];
 
     for (let k = 0; k <= n; k++) {
       terms.push({
@@ -145,7 +162,7 @@ app.post("/api/expand", (req, res) => {
         varA: a,
         powA: n - k,
         varB: b,
-        powB: k,
+        powB: k
       });
     }
 
@@ -155,7 +172,7 @@ app.post("/api/expand", (req, res) => {
   }
 });
 
-// DELETE history
+// Clear history
 app.delete("/api/history", async (req, res) => {
   try {
     await pool.query("DELETE FROM history");
@@ -165,9 +182,10 @@ app.delete("/api/history", async (req, res) => {
   }
 });
 
-// ================= SERVER =================
+/* ================= SERVER ================= */
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
+
 app.listen(PORT, () => {
-  console.log(`✅ Server running on http://localhost:${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
